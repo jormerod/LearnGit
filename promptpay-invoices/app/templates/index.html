@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Batch PromptPay Invoice QR</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; }
+    label { display: block; margin-top: 1rem; font-weight: 600; }
+    input[type=text], input[type=file] { width: 100%; margin-top: 0.25rem; }
+    button { margin-top: 1.5rem; padding: 0.6rem 1.2rem; cursor: pointer; }
+    table { width: 100%; border-collapse: collapse; margin-top: 1.5rem; font-size: 0.9rem; }
+    th, td { border: 1px solid #ccc; padding: 0.4rem; text-align: left; }
+    .error { color: #b00020; }
+    .ok { color: #0a6640; }
+    #zip-link { display: none; margin-top: 1rem; }
+  </style>
+</head>
+<body>
+  <h1>Batch PromptPay Invoice QR</h1>
+  <p>Upload up to {{ max_files }} invoice PDFs. Each file gets a PromptPay QR stamped on page 1.</p>
+
+  <form id="upload-form">
+    <label for="promptpay_id">PromptPay ID (10-digit phone or 13-digit tax ID)</label>
+    <input type="text" id="promptpay_id" name="promptpay_id" required placeholder="0812345678">
+
+    <label for="default_amount">Default amount (THB, optional if not on invoice)</label>
+    <input type="text" id="default_amount" name="default_amount" placeholder="e.g. 1500.00">
+
+    <label for="files">Invoice PDFs</label>
+    <input type="file" id="files" name="files" accept="application/pdf" multiple required>
+
+    <button type="submit" id="submit-btn">Process batch</button>
+  </form>
+
+  <p id="status"></p>
+  <a id="zip-link" href="#">Download all (ZIP)</a>
+  <table id="results" hidden>
+    <thead>
+      <tr>
+        <th>File</th>
+        <th>Condo</th>
+        <th>Invoice</th>
+        <th>Amount</th>
+        <th>Status</th>
+        <th>Download</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <script>
+    const form = document.getElementById('upload-form');
+    const statusEl = document.getElementById('status');
+    const results = document.getElementById('results');
+    const tbody = results.querySelector('tbody');
+    const zipLink = document.getElementById('zip-link');
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      statusEl.textContent = 'Processing…';
+      document.getElementById('submit-btn').disabled = true;
+      tbody.innerHTML = '';
+      results.hidden = true;
+      zipLink.style.display = 'none';
+
+      const fd = new FormData();
+      fd.append('promptpay_id', document.getElementById('promptpay_id').value);
+      const amt = document.getElementById('default_amount').value;
+      if (amt) fd.append('default_amount', amt);
+      for (const f of document.getElementById('files').files) {
+        fd.append('files', f);
+      }
+
+      try {
+        const res = await fetch('/api/batches', { method: 'POST', body: fd });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || res.statusText);
+
+        statusEl.textContent = `Batch ${data.batch_id} — ${data.files.filter(f => f.status === 'ok').length} succeeded`;
+        zipLink.href = `/api/batches/${data.batch_id}/download.zip`;
+        zipLink.style.display = 'inline-block';
+
+        for (const row of data.files) {
+          const tr = document.createElement('tr');
+          const dl = row.output_name
+            ? `<a href="/api/batches/${data.batch_id}/files/${row.output_name}">PDF</a>`
+            : '';
+          tr.innerHTML = `
+            <td>${row.filename}</td>
+            <td>${row.condo ?? ''}</td>
+            <td>${row.invoice ?? ''}</td>
+            <td>${row.amount ?? ''}</td>
+            <td class="${row.status === 'ok' ? 'ok' : 'error'}">${row.status}${row.error ? ': ' + row.error : ''}</td>
+            <td>${dl}</td>`;
+          tbody.appendChild(tr);
+        }
+        results.hidden = false;
+      } catch (err) {
+        statusEl.textContent = 'Error: ' + err.message;
+      } finally {
+        document.getElementById('submit-btn').disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>
